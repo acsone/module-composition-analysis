@@ -78,3 +78,8 @@ class OdooRepositoryBranch(models.Model):
             "branch": self.branch_id.name,
             "last_scanned_commit": self.last_scanned_commit,
         }
+
+    def _update_last_scanned_commit(self, last_scanned_commit):
+        """Update the last scanned commit. Called by job."""
+        self.ensure_one()
+        self.last_scanned_commit = last_scanned_commit

@@ -83,7 +83,7 @@ class BaseScanner:
         self.token = token
         self.workaround_fs_errors = workaround_fs_errors
 
-    def scan(self, fetch=True):
+    def sync(self, fetch=True):
         res = True
         self._apply_git_global_config()
         # Clone or update the repository
@@ -290,7 +290,7 @@ class BaseScanner:
         relative_tree_path = "/".join(
             [dir_ for dir_ in relative_path.split("/") if dir_ and dir_ != "."]
         )
-        # No from_commit means first scan: return all available modules
+        # Return all available modules from 'relative_tree_path'
         branch_commit = repo.remotes.origin.refs[branch].commit
         addons_trees = branch_commit.tree.trees
         if relative_tree_path:
@@ -446,7 +446,7 @@ class MigrationScanner(BaseScanner):
     def scan(self):
         # Clone/fetch has been done during the repository scan, the migration
         # scan will be processed on the current history of commits
-        res = super().scan(fetch=False)
+        res = self.sync(fetch=False)
         # 'super()' could return False if the branch to scan doesn't exist,
         # there is nothing to scan then.
         if not res:
@@ -697,7 +697,7 @@ class RepositoryScanner(BaseScanner):
         org: str,
         name: str,
         clone_url: str,
-        branches: list,
+        branch: str,
         addons_paths_data: list,
         repositories_path: str = None,
         repo_type: str = None,
@@ -709,56 +709,62 @@ class RepositoryScanner(BaseScanner):
             org,
             name,
             clone_url,
-            branches,
+            [branch],
             repositories_path,
             repo_type,
             ssh_key,
             token,
             workaround_fs_errors,
         )
+        self.branch = branch
         self.addons_paths_data = addons_paths_data
 
-    def scan(self):
-        res = super().scan()
+    def detect_modules_to_scan(self):
+        res = self.sync()
         # 'super()' could return False if the branch to scan doesn't exist,
         # there is nothing to scan then.
         if not res:
-            return False
+            return []
         repo_id = self._get_odoo_repository_id()
         branches_scanned = {}
         with self.repo() as repo:
             for branch in self.branches:
-                branches_scanned[branch] = self._scan_branch(repo, repo_id, branch)
-        return res
+                branches_scanned[branch] = self._detect_modules_to_scan_on_branch(
+                    repo, repo_id, branch
+                )
+        return branches_scanned
 
-    def _scan_branch(self, repo, repo_id, branch):
+    def _detect_modules_to_scan_on_branch(self, repo, repo_id, branch):
         if not self._branch_exists(repo, branch):
             return
         branch_id = self._get_odoo_branch_id(repo_id, branch)
         repo_branch_id = self._create_odoo_repository_branch(repo_id, branch_id)
         last_fetched_commit = self._get_last_fetched_commit(repo, branch)
         last_scanned_commit = self._get_repo_last_scanned_commit(repo_branch_id)
+        data = {
+            "repo_branch_id": repo_branch_id,
+            "last_fetched_commit": last_fetched_commit,
+            "last_scanned_commit": last_scanned_commit,
+            "modules_to_scan": {},
+        }
         if last_fetched_commit != last_scanned_commit:
-            # Checkout the source branch to:
-            #   - get the last commit of a module working tree
-            #   - perform module code analysis
+            # Checkout the source branch to get the last commit of a module working tree
             self._checkout_branch(repo, branch)
             # Scan relevant subfolders of the repository
             for addons_path_data in self.addons_paths_data:
-                self._scan_addons_path(
-                    repo,
-                    addons_path_data,
-                    branch,
-                    repo_branch_id,
-                    last_fetched_commit,
-                    last_scanned_commit,
+                data["modules_to_scan"].update(
+                    self._detect_modules_to_scan_in_addons_path(
+                        repo,
+                        addons_path_data,
+                        branch,
+                        repo_branch_id,
+                        last_fetched_commit,
+                        last_scanned_commit,
+                    )
                 )
-            # Flag this repository/branch as scanned
-            self._update_last_scanned_commit(repo_branch_id, last_fetched_commit)
-            return True
-        return False
+        return data
 
-    def _scan_addons_path(
+    def _detect_modules_to_scan_in_addons_path(
         self,
         repo,
         addons_path_data,
@@ -791,20 +797,32 @@ class RepositoryScanner(BaseScanner):
             len(module_paths),
             branch,
         )
-        # Scan each module
-        modules_scanned = {}
+        # Return detected module paths to scan
+        modules_to_scan = {}
         for module_path, last_module_commit in module_paths:
-            self._scan_module(
+            modules_to_scan[module_path] = {
+                "addons_path_data": addons_path_data,
+                "last_module_commit": last_module_commit,
+            }
+        return modules_to_scan
+
+    def scan_module(self, module_path, data):
+        repo_id = self._get_odoo_repository_id()
+        branch_id = self._get_odoo_branch_id(repo_id, self.branch)
+        repo_branch_id = self._create_odoo_repository_branch(repo_id, branch_id)
+        with self.repo() as repo:
+            # Checkout the source branch to perform module code analysis
+            branch_commit = self._get_last_fetched_commit(repo, self.branch)
+            if repo.head.commit.hexsha != branch_commit:
+                self._checkout_branch(repo, self.branch)
+            return self._scan_module(
                 repo,
-                branch,
+                self.branch,
                 repo_branch_id,
                 module_path,
-                last_module_commit,
-                addons_path_data,
+                data["last_module_commit"],
+                data["addons_path_data"],
             )
-            module = module_path.split("/")[-1]
-            modules_scanned[module] = True
-        return modules_scanned
 
     def _scan_module(
         self,
