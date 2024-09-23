@@ -170,10 +170,43 @@ class OdooRepository(models.Model):
         # Ensure the folder exists
         pathlib.Path(repositories_path).mkdir(parents=True, exist_ok=True)
 
+    def _check_existing_jobs(self, raise_exc=True):
+        """Check if a scan is already triggered for this repository."""
+        self.ensure_one()
+        existing_job = (
+            self.env["queue.job"]
+            .sudo()
+            .search(
+                [
+                    ("model_name", "=", self._name),
+                    ("records", "ilike", f'%"ids": [{self.id}]%'),
+                    (
+                        "state",
+                        "in",
+                        [
+                            "wait_dependencies",
+                            "pending",
+                            "enqueued",
+                            "started",
+                        ],
+                    ),
+                ],
+                limit=1,
+            )
+        )
+        if existing_job:
+            if raise_exc:
+                raise UserError(
+                    _("A scan is already ongoing for repository %s") % self.display_name
+                )
+            return False
+        return True
+
     def action_scan(self, branches=None, force=False):
         """Scan the whole repository."""
         self._check_config()
         for rec in self:
+            rec._check_existing_jobs(raise_exc=len(self) == 1)
             # Copy `branches` list to not override initial values
             branches_ = branches and branches[:] or []
             if not rec.to_scan:
@@ -190,9 +223,106 @@ class OdooRepository(models.Model):
                 rec._reset_scanned_commits(branches_)
             # Scan repository branches sequentially as they need to be checked out
             # to perform the analysis
-            jobs = rec._create_jobs(branches_)
-            chain(*jobs).delay()
+            # Here the launched job is responsible to:
+            #   1) detect modules updated on the first branch
+            #   2) spawn jobs to scan each module on that branch
+            #   3) spawn a job to update the last scanned commit of the repo/branch
+            #   4) spawn the next job responsible to detect modules updated
+            #      on the next branch
+            branch = branches_[0]
+            next_branches = branches_[1:]
+            job = rec._create_job_detect_modules_to_scan_on_branch(
+                branch, next_branches, branches_
+            )
+            job.delay()
         return True
+
+    def _create_job_detect_modules_to_scan_on_branch(
+        self, branch, next_branches, all_branches
+    ):
+        self.ensure_one()
+        delayable = self.delayable(
+            description=f"Detect modules to scan in {self.display_name}#{branch}",
+            identity_key=identity_exact,
+        )
+        return delayable._detect_modules_to_scan_on_branch(
+            branch, next_branches, all_branches
+        )
+
+    def _detect_modules_to_scan_on_branch(self, branch, next_branches, all_branches):
+        """Detect the modules to scan on `branch`.
+
+        It will spawn a job for each module to scan, and two other jobs to:
+            - update the last scanned commit on the repo/branch
+            - scan the next branch (so each branch is scanned in cascade)
+
+        This ensure to scan different branches sequentially for a given repository.
+        """
+        try:
+            # Get the list of modules updated since last scan
+            params = self._prepare_scanner_parameters(branch)
+            scanner = RepositoryScannerOdooEnv(**params)
+            data = scanner.detect_modules_to_scan()[branch]
+            # Prepare all subsequent jobs based on modules to scan
+            jobs = self._create_subsequent_jobs(
+                branch, next_branches, all_branches, data
+            )
+            # Chain them  altogether
+            chain(*jobs).delay()
+        except Exception as exc:
+            raise RetryableJobError("Scanner error") from exc
+
+    def _create_subsequent_jobs(self, branch, next_branches, all_branches, data):
+        jobs = []
+        # Spawn one job per module to scan
+        for module_path, params in data["modules_to_scan"].items():
+            job = self._create_job_scan_module_on_branch(branch, module_path, params)
+            jobs.append(job)
+        # + another one to update the last scanned commit of the repository
+        job = self._create_job_update_last_scanned_commit(
+            data["repo_branch_id"],
+            data["last_fetched_commit"],
+        )
+        jobs.append(job)
+        # + another one to detect modules to scan on the next branch
+        branch = next_branches and next_branches[0]
+        next_branches = next_branches[1:]
+        if branch:
+            jobs.append(
+                self._create_job_detect_modules_to_scan_on_branch(
+                    branch, next_branches, all_branches
+                )
+            )
+        return jobs
+
+    def _create_job_scan_module_on_branch(self, branch, module_path, data):
+        self.ensure_one()
+        delayable = self.delayable(
+            description=f"Scan module {module_path} in {self.display_name}#{branch}",
+            identity_key=identity_exact,
+        )
+        return delayable._scan_module_on_branch(branch, module_path, data)
+
+    def _scan_module_on_branch(self, branch, module_path, data):
+        """Scan `module_path` from `branch`."""
+        try:
+            params = self._prepare_scanner_parameters(branch)
+            scanner = RepositoryScannerOdooEnv(**params)
+            return scanner.scan_module(module_path, data)
+        except Exception as exc:
+            raise RetryableJobError("Scanner error") from exc
+
+    def _create_job_update_last_scanned_commit(
+        self, repo_branch_id, last_scanned_commit, last_scan=False
+    ):
+        self.ensure_one()
+        repo_branch_model = self.env["odoo.repository.branch"]
+        repo_branch = repo_branch_model.browse(repo_branch_id).exists()
+        delayable = repo_branch.delayable(
+            description=f"Update last scanned commit of {self.display_name}",
+            identity_key=identity_exact,
+        )
+        return delayable._update_last_scanned_commit(last_scanned_commit)
 
     def _reset_scanned_commits(self, branches=None):
         """Reset the scanned commits.
@@ -210,27 +340,6 @@ class OdooRepository(models.Model):
         )
         branches_.write({"last_scanned_commit": False})
         branches_.module_ids.sudo().write({"last_scanned_commit": False})
-
-    def _create_jobs(self, branches):
-        self.ensure_one()
-        jobs = []
-        for branch in branches:
-            delayable = self.delayable(
-                description=f"Scan {self.display_name}#{branch}",
-                identity_key=identity_exact,
-            )
-            job = delayable._scan_branch(branch)
-            jobs.append(job)
-        return jobs
-
-    def _scan_branch(self, branch):
-        """Scan a repository branch"""
-        try:
-            params = self._prepare_scanner_parameters(branch)
-            scanner = RepositoryScannerOdooEnv(**params)
-            return scanner.scan()
-        except Exception as exc:
-            raise RetryableJobError("Scanner error") from exc
 
     def _get_token(self):
         """Return the first available token found for this repository.
@@ -254,7 +363,7 @@ class OdooRepository(models.Model):
             "org": self.org_id.name,
             "name": self.name,
             "clone_url": self.clone_url,
-            "branches": [branch],
+            "branch": branch,
             "addons_paths_data": self.addons_path_ids.read(
                 [
                     "relative_path",
