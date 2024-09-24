@@ -1,7 +1,7 @@
 # Copyright 2023 Camptocamp SA
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl)
 
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class OdooModuleBranch(models.Model):
@@ -12,6 +12,43 @@ class OdooModuleBranch(models.Model):
         inverse_name="module_branch_id",
         string="Migrations",
     )
+
+    migration_scan = fields.Boolean(
+        compute="_compute_migration_scan",
+        store=True,
+        help="Technical field telling if this module is elligible for a migration scan.",
+    )
+
+    @api.depends(
+        "last_scanned_commit",
+        "migration_ids.last_source_scanned_commit",
+    )
+    def _compute_migration_scan(self):
+        for rec in self:
+            # Default repository migration scan policy
+            rec.migration_scan = rec.repository_id.collect_migration_data
+            if not rec.migration_scan:
+                continue
+            # Repository scan has to be performed first
+            if not rec.last_scanned_commit:
+                continue
+            # Migration scan to do as soon as one branch is missing among all
+            # migration paths
+            migration_paths = self.env["odoo.migration.path"].search([])
+            source_branches = migration_paths.source_branch_id
+            if source_branches != rec.migration_ids.source_branch_id:
+                rec.migration_scan = True
+                continue
+            target_branches = migration_paths.target_branch_id
+            if target_branches != rec.migration_ids.target_branch_id:
+                rec.migration_scan = True
+                continue
+            # Migration scan to do if last scanned commit doesn't match the last
+            # migration scan
+            for migration in rec.migration_ids:
+                if migration.last_source_scanned_commit != rec.last_scanned_commit:
+                    rec.migration_scan = True
+                    break
 
     def _to_dict(self):
         # Add the migrations data
