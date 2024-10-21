@@ -112,16 +112,37 @@ class OdooProjectImportModules(models.TransientModel):
             ("module_id", "=", module.id),
             ("branch_id", "=", self.odoo_project_id.odoo_version_id.id),
         ]
+        # If the project has a repository
+        if self.odoo_project_id.repository_id:
+            # Look for modules hosted in generic repositories (not specific ones)
+            # or in the project repository itself.
+            args.extend(
+                [
+                    "|",
+                    ("repository_id.specific", "=", False),
+                    ("repository_id", "=", self.odoo_project_id.repository_id.id),
+                ]
+            )
+        # If it doesn't (project simulation)
+        else:
+            # Look for modules hosted in generic repositories only
+            args.extend(
+                [
+                    ("repository_id.specific", "=", False),
+                ]
+            )
         module_branch = module_branch_model.search(args)
         if not module_branch:
-            # Create the module
+            # Create an orphaned module
             branch = self.odoo_project_id.odoo_version_id
-            values = {
-                "module_id": module.id,
-                "branch_id": branch.id,
-            }
-            module_branch = module_branch_model.sudo().create(values)
-        if not module.blacklisted and not module_branch.repository_branch_id:
+            module_branch = module_branch_model.sudo()._create_orphaned_module_branch(
+                branch, module
+            )
+        if (
+            not module.blacklisted
+            and not module_branch.repository_branch_id
+            and not module_branch.specific
+        ):
             # If the module hasn't been found in existing repositories content,
             # it could be available somewhere on GitHub as a PR that could help
             # to identity its repository
