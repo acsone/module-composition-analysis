@@ -87,6 +87,12 @@ class Common(TransactionCase, CommonCase):
         )
         return commit.hexsha
 
+    def _run_odoo_repository_action_scan(self, branch, force=False):
+        """Run `action_scan` for given `branch` on the Odoo repository."""
+        self.odoo_repository.with_context(queue_job__no_delay=True).action_scan(
+            [branch], force=force
+        )
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
