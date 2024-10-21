@@ -1,10 +1,12 @@
 # Copyright 2024 Camptocamp SA
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl)
 
+from odoo.exceptions import ValidationError
+
 from .common import Common
 
 
-class TestOdooModuleDependencyLevel(Common):
+class TestOdooModuleBranch(Common):
     def _create_odoo_module(self, name):
         return self.env["odoo.module"].create({"name": name})
 
@@ -15,6 +17,18 @@ class TestOdooModuleDependencyLevel(Common):
         }
         vals.update(values)
         return self.env["odoo.module.branch"].create(vals)
+
+    def test_constraint_generic_depends_on_specific(self):
+        generic_mod = self._create_odoo_module("generic_mod")
+        generic_mod_branch = self._create_odoo_module_branch(
+            generic_mod, self.branch, specific=False
+        )
+        specific_mod = self._create_odoo_module("specific_mod")
+        specific_mod_branch = self._create_odoo_module_branch(
+            specific_mod, self.branch, specific=True
+        )
+        with self.assertRaises(ValidationError):
+            generic_mod_branch.dependency_ids = specific_mod_branch
 
     def test_dependency_level(self):
         # base module in the dependencies tree
