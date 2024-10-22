@@ -28,6 +28,7 @@
                     />
         </header>
         <sheet>
+          <div class="oe_button_box" name="button_box" />
           <group>
             <group name="repository" string="Repository">
               <group colspan="2">
@@ -68,6 +69,7 @@
                                 options="{'no_open': True}"
                                 attrs="{'readonly': [('branch_ids', '!=', [])]}"
                             />
+              <field name="specific" />
               <field
                                 name="odoo_version_id"
                                 options="{'no_open': True}"
