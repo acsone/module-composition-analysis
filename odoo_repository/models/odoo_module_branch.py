@@ -1,6 +1,7 @@
 # Copyright 2023 Camptocamp SA
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl)
 
+import pathlib
 import random
 import time
 from urllib.parse import urlparse
@@ -164,6 +165,7 @@ class OdooModuleBranch(models.Model):
     addons_path = fields.Char(
         help="Technical field. Where the module is located in the repository."
     )
+    full_path = fields.Char(compute="_compute_full_path")
     url = fields.Char("URL", compute="_compute_url")
 
     _sql_constraints = [
@@ -173,6 +175,13 @@ class OdooModuleBranch(models.Model):
             "This module already exists for this branch.",
         ),
     ]
+
+    @api.depends("module_name", "addons_path")
+    def _compute_full_path(self):
+        for rec in self:
+            rec.full_path = pathlib.Path(rec.addons_path or ".").joinpath(
+                rec.module_name
+            )
 
     @api.depends("repository_id.repo_url", "branch_name", "addons_path", "module_name")
     def _compute_url(self):
