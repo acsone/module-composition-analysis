@@ -110,26 +110,9 @@ class OdooProjectImportModules(models.TransientModel):
         module_branch_model = self.env["odoo.module.branch"]
         module_branch = False
         branch = self.odoo_project_id.odoo_version_id
-        # If the project has a repository, check in it first
-        if self.odoo_project_id.repository_id:
-            # Look for modules hosted in generic repositories (not specific ones)
-            # or in the project repository itself.
-            module_branch = module_branch_model._get_module_branch(
-                branch, module, repo=self.odoo_project_id.repository_id
-            )
-        # If no module found, check if a generic one matches
-        if not module_branch:
-            modules_branch = module_branch_model._get_module_branch(
-                branch,
-                module,
-                domain=[("specific", "=", False), ("repository_id", "!=", False)],
-            )
-            module_branch = fields.first(modules_branch)
-        # If still not module matches, create an orphaned one
-        if not module_branch:
-            module_branch = module_branch_model.sudo()._create_orphaned_module_branch(
-                branch, module
-            )
+        module_branch = module_branch_model._find_or_create(
+            branch, module, self.odoo_project_id.repository_id
+        )
         if (
             not module.blacklisted
             and not module_branch.repository_branch_id

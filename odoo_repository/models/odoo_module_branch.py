@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from odoo import _, api, fields, models, tools
 from odoo.exceptions import ValidationError
+from odoo.osv import expression
 
 from odoo.addons.queue_job.exception import RetryableJobError
 
@@ -629,35 +630,50 @@ class OdooModuleBranch(models.Model):
             return rec.id
         return False
 
+    @api.model
+    def _find(self, branch, module, repo, domain=None):
+        """Find an `odoo.module.branch` record matching parameters."""
+        # Look for the module first in the current repository
+        module_branch = self._get_module_branch(
+            branch, module, repo=repo, domain=domain
+        )
+        # Then look among generic modules
+        if not module_branch:
+            modules_branch = self._get_module_branch(
+                branch,
+                module,
+                domain=expression.AND(
+                    [
+                        domain or [],
+                        [("specific", "=", False), ("repository_id", "!=", False)],
+                    ],
+                ),
+            )
+            module_branch = fields.first(modules_branch)
+        # Otherwise look for the module among orphaned modules
+        if not module_branch:
+            module_branch = self._get_orphaned_module_branch(
+                branch, module, domain=domain
+            )
+        return module_branch
+
+    @api.model
+    def _find_or_create(self, branch, module, repo, domain=None):
+        """Find an `odoo.module.branch` record, or create an orphaned one."""
+        module_branch = self._find(branch, module, repo, domain=domain)
+        # If still not found, create the module as an orphaned module
+        # (it will hopefully be bound to a repository later)
+        if not module_branch:
+            module_branch = self.sudo()._create_orphaned_module_branch(branch, module)
+        return module_branch
+
     def _get_dependency_ids(self, repo_branch, depends: list):
         dependency_ids = []
         for depend in depends:
             module = self._get_module(depend)
-            # TODO: consolidate this module.branch lookup in a method, same is used
-            # in 'odoo_project' module when importing a list of modules
-            # Look for the dependency first in the current repository
-            dependency = self._get_module_branch(
-                repo_branch.branch_id, module, repo=repo_branch.repository_id
+            dependency = self._find_or_create(
+                repo_branch.branch_id, module, repo_branch.repository_id
             )
-            # Then look among generic modules
-            if not dependency:
-                dependencies = self._get_module_branch(
-                    repo_branch.branch_id,
-                    module,
-                    domain=[("specific", "=", False), ("repository_id", "!=", False)],
-                )
-                dependency = fields.first(dependencies)
-            # Otherwise look for the dependency among orphaned modules
-            if not dependency:
-                dependency = self._get_orphaned_module_branch(
-                    repo_branch.branch_id, module
-                )
-            # If still not found, create the dependency as an orphaned module
-            # (it will hopefully be bound to a repository later)
-            if not dependency:
-                dependency = self.sudo()._create_orphaned_module_branch(
-                    repo_branch.branch_id, module
-                )
             dependency_ids.append(dependency.id)
         return dependency_ids
 
