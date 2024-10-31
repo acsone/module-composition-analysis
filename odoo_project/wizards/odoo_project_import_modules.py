@@ -108,20 +108,16 @@ class OdooProjectImportModules(models.TransientModel):
         If it doesn't exist it'll be automatically created.
         """
         module_branch_model = self.env["odoo.module.branch"]
-        args = [
-            ("module_id", "=", module.id),
-            ("branch_id", "=", self.odoo_project_id.odoo_version_id.id),
-        ]
-        module_branch = module_branch_model.search(args)
-        if not module_branch:
-            # Create the module
-            branch = self.odoo_project_id.odoo_version_id
-            values = {
-                "module_id": module.id,
-                "branch_id": branch.id,
-            }
-            module_branch = module_branch_model.sudo().create(values)
-        if not module.blacklisted and not module_branch.repository_branch_id:
+        module_branch = False
+        branch = self.odoo_project_id.odoo_version_id
+        module_branch = module_branch_model._find_or_create(
+            branch, module, self.odoo_project_id.repository_id
+        )
+        if (
+            not module.blacklisted
+            and not module_branch.repository_branch_id
+            and not module_branch.specific
+        ):
             # If the module hasn't been found in existing repositories content,
             # it could be available somewhere on GitHub as a PR that could help
             # to identity its repository
@@ -134,11 +130,11 @@ class OdooProjectImportModules(models.TransientModel):
         If it doesn't exist it'll be automatically created.
         """
         project_module_model = self.env["odoo.project.module"]
-        args = [
+        domain = [
             ("module_branch_id", "=", module_branch.id),
             ("odoo_project_id", "=", self.odoo_project_id.id),
         ]
-        project_module = project_module_model.search(args)
+        project_module = project_module_model.search(domain)
         values = {
             "module_branch_id": module_branch.id,
             "odoo_project_id": self.odoo_project_id.id,
