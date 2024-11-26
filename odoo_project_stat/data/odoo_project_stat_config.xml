@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!-- Copyright 2024 Camptocamp SA
      License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl). -->
-<odoo>
+<odoo noupdate="1">
 
   <record id="odoo_project_stat_config_odoo_ce" model="odoo.project.stat.config">
     <field name="sequence" eval="1" />
     <field name="name">Odoo CE</field>
     <field name="color">#985184</field>
-    <!--<field name="color">11</field>-->
     <field
             name="domain"
             eval="[
@@ -26,7 +25,6 @@
     <field name="sequence" eval="2" />
     <field name="name">Odoo Enterprise</field>
     <field name="color">#1ad3bb</field>
-    <!--<field name="color">7</field>-->
     <field
             name="domain"
             eval="[
@@ -42,7 +40,6 @@
     <field name="sequence" eval="3" />
     <field name="name">OCA</field>
     <field name="color">#a4b0f1</field>
-    <!--<field name="color">4</field>-->
     <field
             name="domain"
             eval="[
@@ -58,7 +55,6 @@
     <field name="sequence" eval="4" />
     <field name="name">Community</field>
     <field name="color">#c3ccfc</field>
-    <!--<field name="color">8</field>-->
     <field
             name="domain"
             eval="[
@@ -80,9 +76,8 @@
 
   <record id="odoo_project_stat_config_others" model="odoo.project.stat.config">
     <field name="sequence" eval="6" />
-    <field name="name">Others</field>
+    <field name="name">Misc.</field>
     <field name="color">#f3f4f6</field>
-    <!--<field name="color">3</field>-->
     <field name="residual" eval="True" />
   </record>
 
