@@ -12,7 +12,6 @@
             eval="[
         ('is_standard', '=', True),
         ('is_enterprise', '=', False),
-        ('specific', '=', False),
         ('org_id', '=', ref('odoo_repository.odoo_repository_org_odoo')),
       ]"
         />
@@ -30,7 +29,6 @@
             eval="[
         ('is_standard', '=', True),
         ('is_enterprise', '=', True),
-        ('specific', '=', False),
         ('org_id', '=', ref('odoo_repository.odoo_repository_org_odoo')),
       ]"
         />
@@ -43,9 +41,6 @@
     <field
             name="domain"
             eval="[
-        ('is_standard', '=', False),
-        ('is_community', '=', True),
-        ('specific', '=', False),
         ('org_id', '=', ref('odoo_repository.odoo_repository_org_oca')),
       ]"
         />
@@ -58,10 +53,9 @@
     <field
             name="domain"
             eval="[
-        ('is_standard', '=', False),
         ('is_community', '=', True),
         ('specific', '=', False),
-        ('org_id', '!=', ref('odoo_repository.odoo_repository_org_oca')),
+        ('org_id', 'not in', (ref('odoo_repository.odoo_repository_org_odoo'), ref('odoo_repository.odoo_repository_org_oca'))),
       ]"
         />
   </record>
@@ -70,7 +64,6 @@
     <field name="sequence" eval="5" />
     <field name="name">Specific</field>
     <field name="color">#ff680a</field>
-    <!--<field name="color">1</field>-->
     <field name="domain" eval="[('specific', '=', True)]" />
   </record>
 
