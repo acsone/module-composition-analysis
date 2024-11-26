@@ -9,12 +9,13 @@ class OdooProjectStat(models.Model):
     _name = "odoo.project.stat"
     _description = "Odoo Project Stats"
     _rec_name = "name"
-    _order = "sequence, name"
+    _order = "odoo_project_id, date, sequence, name"
 
     odoo_project_id = fields.Many2one(
         comodel_name="odoo.project",
         ondelete="cascade",
         string="Project",
+        index=True,
         required=True,
         readonly=True,
     )
@@ -25,6 +26,7 @@ class OdooProjectStat(models.Model):
         required=True,
         readonly=True,
     )
+    date = fields.Date(required=True, index=True)
     sequence = fields.Integer(related="config_id.sequence", store=True)
     name = fields.Char(related="config_id.name", store=True)
     color = fields.Char(related="config_id.color")
@@ -33,11 +35,19 @@ class OdooProjectStat(models.Model):
 
     _sql_constraints = [
         (
-            "odoo_project_config_uniq",
-            "UNIQUE (odoo_project_id, config_id)",
+            "odoo_project_config_date_uniq",
+            "UNIQUE (odoo_project_id, config_id, date)",
             "This project stats record already exists.",
         ),
     ]
+
+    def _get_stats(self, odoo_project, date=None, config=None, limit=None):
+        domain = [("odoo_project_id", "=", odoo_project.id)]
+        if date:
+            domain.append(("date", "=", date))
+        if config:
+            domain.append(("config_id", "=", config.id))
+        return self.search(domain, limit=limit)
 
     def _generate_stats(self, odoo_project_id):
         """Generate the stats for a given `odoo_project_id`."""
@@ -51,22 +61,23 @@ class OdooProjectStat(models.Model):
             + sum(modules.mapped("sloc_js"))
             + sum(modules.mapped("sloc_css"))
         )
+        # Clean up stats of today if any
+        today = fields.Date.today()
+        existing_stats = self._get_stats(odoo_project, date=today)
+        existing_stats.sudo().unlink()
+        # Create or update existing stat record
         configs = self.env["odoo.project.stat.config"].search([])
         for config in configs:
-            # Create or update existing stat record
-            stat = odoo_project.module_stats_ids.filtered(
-                lambda o: o.config_id == config
-            )
+            stat = self._get_stats(odoo_project, date=today, config=config, limit=1)
             values = self._generate_stat_values(odoo_project, config, total_count)
             if stat:
                 stat.sudo().write(values)
             else:
                 self.sudo().create(values)
-        stat_residual = odoo_project.module_stats_ids.filtered(
-            lambda o: o.config_id.residual
-        )
+        stats = self._get_stats(odoo_project, date=today)
+        stat_residual = stats.filtered(lambda o: o.config_id.residual)
         if stat_residual:
-            other_stats = odoo_project.module_stats_ids - stat_residual
+            other_stats = stats - stat_residual
             stat_residual.sudo().write(
                 {
                     "modules_count": (
@@ -97,6 +108,7 @@ class OdooProjectStat(models.Model):
         return {
             "odoo_project_id": odoo_project.id,
             "config_id": config.id,
+            "date": fields.Date.today(),
             "modules_count": modules_count,
             "sloc": sloc,
         }

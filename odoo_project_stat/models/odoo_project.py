@@ -10,7 +10,7 @@ from odoo import fields, models
 class OdooProject(models.Model):
     _inherit = "odoo.project"
 
-    module_stats_ids = fields.One2many(
+    stats_ids = fields.One2many(
         comodel_name="odoo.project.stat",
         inverse_name="odoo_project_id",
     )
@@ -23,15 +23,24 @@ class OdooProject(models.Model):
         compute="_compute_charts",
     )
 
-    def action_generate_stats(self):
-        for rec in self:
-            self.env["odoo.project.stat"]._generate_stats(rec.id)
-        return True
+    def _get_last_stats(self):
+        self.ensure_one()
+        last_stat = self.env["odoo.project.stat"].search(
+            [("odoo_project_id", "=", self.id)],
+            order="date DESC",
+            limit=1,
+        )
+        if not last_stat:
+            return self.env["odoo.project.stat"].browse()
+        return self.env["odoo.project.stat"].search(
+            [("odoo_project_id", "=", self.id), ("date", "=", last_stat.date)],
+            order="sequence",
+        )
 
     def _compute_charts(self):
         for rec in self:
             rec.chart_modules_count = rec.chart_sloc = False
-            stats = rec.module_stats_ids.sorted("sequence")
+            stats = rec._get_last_stats()
             labels = stats.mapped("name")
             colors = stats.mapped("color")
             count_values = stats.mapped("modules_count")
@@ -93,3 +102,8 @@ class OdooProject(models.Model):
             width=450,
             height=450,
         )
+
+    def action_generate_stats(self):
+        for rec in self:
+            self.env["odoo.project.stat"]._generate_stats(rec.id)
+        return True
