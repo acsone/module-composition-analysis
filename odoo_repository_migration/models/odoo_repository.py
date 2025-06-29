@@ -61,8 +61,8 @@ class OdooRepository(models.Model):
             return jobs
         # Override to run the MigrationScanner once branches are scanned
         args = []
+        all_versions = [vb[0] for vb in all_versions_branches]
         if all_versions_branches:
-            all_versions = [vb[0] for vb in all_versions_branches]
             # A strict scan of branches avoids unwanted migration scans
             # For instance if we are interested only by 14.0 and 17.0 branches,
             # this avoids to scan other migration paths like 15.0 -> 17.0
@@ -86,8 +86,12 @@ class OdooRepository(models.Model):
                     migration_path.target_branch_id.name,
                 )
                 versions_branches = [
-                    vb for vb in all_versions_branches if vb[0] in mig_path
+                    vb
+                    for vb in all_versions_branches
+                    if set(mig_path).issubset(set(all_versions))
                 ]
+                if not versions_branches:
+                    continue
                 migration_paths_param[migration_path.id] = versions_branches
 
             delayable = self.delayable(
