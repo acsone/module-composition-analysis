@@ -61,8 +61,8 @@ class OdooRepository(models.Model):
             return jobs
         # Override to run the MigrationScanner once branches are scanned
         args = []
-        all_versions = [vb[0] for vb in all_versions_branches]
         if all_versions_branches:
+            all_versions = [vb[0] for vb in all_versions_branches]
             # A strict scan of branches avoids unwanted migration scans
             # For instance if we are interested only by 14.0 and 17.0 branches,
             # this avoids to scan other migration paths like 15.0 -> 17.0
@@ -81,17 +81,28 @@ class OdooRepository(models.Model):
             # E.g. {MIG_PATH_ID: [('14.0', 'master'), ('18.0', '18.0-mig')], ...}
             migration_paths_param = {}
             for migration_path in migration_paths:
-                mig_path = (
-                    migration_path.source_branch_id.name,
-                    migration_path.target_branch_id.name,
+                source_rb = self.branch_ids.filtered(
+                    lambda rb: rb.branch_id == migration_path.source_branch_id
                 )
-                versions_branches = [
-                    vb
-                    for vb in all_versions_branches
-                    if set(mig_path).issubset(set(all_versions))
-                ]
-                if not versions_branches:
+                target_rb = self.branch_ids.filtered(
+                    lambda rb: rb.branch_id == migration_path.target_branch_id
+                )
+                # Need the two Odoo versions of the migration path available
+                # in the scanned repository
+                if not source_rb or not target_rb:
                     continue
+                # Build list of tuples (Odoo version, branch name) corresponding
+                # to the migration path
+                versions_branches = [
+                    (
+                        source_rb.branch_id.name,
+                        source_rb.cloned_branch or source_rb.branch_id.name,
+                    ),
+                    (
+                        target_rb.branch_id.name,
+                        target_rb.cloned_branch or target_rb.branch_id.name,
+                    ),
+                ]
                 migration_paths_param[migration_path.id] = versions_branches
 
             delayable = self.delayable(
