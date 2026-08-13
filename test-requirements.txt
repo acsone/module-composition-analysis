@@ -1,1 +1,2 @@
 oca-port
+odoo-addon-web-widget-plotly-chart @ git+https://github.com/OCA/web.git@refs/pull/3639/head#subdirectory=web_widget_plotly_chart
